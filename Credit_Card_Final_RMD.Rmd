@@ -1,0 +1,216 @@
+---
+title: "Credit Card Fraud"
+author: "Jazib Jamal / Frenk Koko"
+date: "6/29/2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#PART ONE - IN this part, we upload the packages, the data and find its basic information.
+
+#To begin with, we need to load the required packages
+
+```{r cars}
+library(gplots, warn.conflicts = FALSE)
+library("ROCR")
+library("PRROC")
+library("readr")
+```
+
+#We will add the data set
+
+```{r pressure, echo=FALSE}
+credit <- read_csv("~/Documents/Predictive Analytics/Course Project/creditcard.csv")
+
+#After adding the data, we want to move the dependent variable "Class" to the left/
+credit <- credit[,c(1,31,30,2:29)]
+
+#Looking at "Time" we see that this variable has no-significance and merely lists the transactions in chronological order. We do not want this variable to effect the result hence we remove it.
+credit <-credit[, !(names(credit) == "Time")]
+```
+
+
+#PART TWO - In this part, we figure out the base-accuracy and create the model which we wil use.
+
+```{r}
+Totalrows <- nrow(credit)
+Totalfraud <- nrow(credit[credit$Class == 1,])
+Totalnonfraud <- Totalrows - Totalfraud
+
+#Total transactions?
+Totalrows 
+
+#Fraud transaction?
+Totalfraud
+
+#Clean transactions?
+Totalnonfraud
+```
+
+
+# Early Observation: The data is highly skewed. The number of fraud transactions are much lower than those of non-fraud ones 492 out of 284807 transactions. Normally numbers are this low for fraud transactions vs nonfraud.
+
+##Modeling Data
+
+## Training and test Data Calculations
+```{r}
+Train.percent <- 0.7
+Test.percent <- 0.3
+train.data.calc <- floor(Train.percent*Totalrows)
+test.data.calc <- Totalrows - train.data.calc
+
+## Separating the train and test sets 
+train.data <- credit[1:train.data.calc,]
+test.data <- credit[(train.data.calc+1):Totalrows,]
+rownames(test.data) <- NULL
+
+#  Fraud vs Non-Fraud Rows in test data
+Fraudrows <- nrow(test.data[test.data$Class == 1,])
+Nonfraudrows <- test.data.calc - Fraudrows
+
+# The basic Accuracy of Nonfraud predictions
+Accuracy <- Nonfraudrows/test.data.calc
+```
+
+##7 Creating the table to store accuracy calculations
+
+```{r}
+
+Model <- data.frame(Column_Range=character(),TP_Bal=integer(),FP_Bal=integer(),Cutoff_Bal=double(),Accuracy_Bal=double(),TP_Max=integer(),FP_Max=integer(),Cutoff_Max=double(),Accuracy_Max=double(),TP_Mid=integer(),FP_Mid=integer(),Cutoff_Mid=double(),Accuracy_Mid=double(),Accuracy_Base=double(),AUC=double(),AUPRC=double(),stringsAsFactors = FALSE)
+
+#Logistic Regression
+
+#Getting the test data and training data for current iteration
+traindata.iteration <- train.data[,1:ncol(credit)]
+testdata.iteration <- test.data[,1:ncol(credit)]
+
+#Modelling the data 
+glm.model <- glm(formula = Class~., family=binomial(link="logit"), data=traindata.iteration)
+
+#Classifying the test data 
+p <- predict(glm.model, newdata=subset(testdata.iteration), type="response")
+
+#Predicting the cutoff probabilities for the predicted values
+pr <- prediction(p, testdata.iteration$Class)
+
+#Compute area under the ROC curve
+auc <- performance(pr, measure = "auc")
+auc <- auc@y.values[[1]]
+
+prcdataframe <- data.frame(p, testdata.iteration$Class)
+prc <- pr.curve(prcdataframe[prcdataframe$testdata.iteration.Class == 1,]$p, prcdataframe[prcdataframe$testdata.iteration.Class == 0,]$p)
+
+```
+
+
+# Retrieving values from model
+
+```{r}
+cutoffs <- pr@cutoffs[[1]]
+truepositive <- pr@tp[[1]]
+truenegative <- pr@tn[[1]]
+falsenegative <- pr@fn[[1]]
+falsepositive <- pr@fp[[1]]
+
+max.truepositive.index <- 0
+max.sensitivity.specificity.Index <- 1
+max.sensitivity.specificity.Threshold <- 0
+mid.cutoff.index <- 0
+
+#Finding cutoff probabilities 
+for(i in seq_along(cutoffs)) {
+  sensitivity <- truepositive[i]/Fraudrows
+  specificity <- truenegative[i]/Nonfraudrows
+  sensitivity.specificity.threshold <- sensitivity + specificity
+  
+  if(sensitivity.specificity.threshold > max.sensitivity.specificity.Threshold) {
+    max.sensitivity.specificity.Threshold <- sensitivity.specificity.threshold
+    max.sensitivity.specificity.Threshold <- i
+  }
+  
+  if(sensitivity == 1 && max.truepositive.index== 0){
+    max.truepositive.index <- i
+  } 
+  
+  if(cutoffs[i][[1]] < 0.5 && mid.cutoff.index == 0) {
+    mid.cutoff.index <- i
+  }
+}
+
+# Retreieving the cutoff probability at maximum threshold
+Threshold.probability <- cutoffs[max.sensitivity.specificity.Index]
+```
+
+# Plot of sensitivity and specificity curves
+```{r}
+graph.x = cutoffs
+graph.y1 = truepositive/Fraudrows
+graph.y2 = truenegative/Nonfraudrows
+
+par(mar=c(6,5,5,6)+0.5)
+plot(graph.x,graph.y1,type="l",col="red",yaxt="n",xlab="",ylab="", main="Variable 1-28")
+axis(2)
+par(new=TRUE)
+plot(graph.x, graph.y2,type="l",col="green",xaxt="n",yaxt="n",xlab="",ylab="")
+axis(4)
+mtext("Specificity",side=4,line=3)
+mtext("Sensitivity",side=2,line=3)
+mtext("Cutoff",side=1,line=3)
+```
+
+
+```{r}
+### Plot Observation: Our goal of this graph is to find the cutoff probability where fraud and non fraud detection are at the maximum or at the top left corner of the graph. 
+
+
+# Creating data for the table
+Model[1,1] = "Amount, V1 - V28"
+Model[1,2] = truepositive[max.sensitivity.specificity.Index]
+Model[1,3] = falsepositive[max.sensitivity.specificity.Index]
+Model[1,4] = cutoffs[max.sensitivity.specificity.Index]
+Model[1,5] = (truepositive[max.sensitivity.specificity.Index] + truenegative[max.sensitivity.specificity.Index])/test.data.calc
+Model[1,6] = truepositive[max.truepositive.index]
+Model[1,7] = falsepositive[max.truepositive.index]
+Model[1,8] = cutoffs[max.truepositive.index]
+Model[1,9] = (truepositive[max.truepositive.index] + truenegative[max.truepositive.index])/test.data.calc
+Model[1,10] = truepositive[mid.cutoff.index]
+Model[1,11] = falsepositive[mid.cutoff.index]
+Model[1,12] = cutoffs[mid.cutoff.index]
+Model[1,13] = (truepositive[mid.cutoff.index] + truenegative[mid.cutoff.index])/test.data.calc
+Model[1,14] = Accuracy
+Model[1,15] = auc
+Model[1,16] = prc$auc.integral
+```
+
+```{r}
+##GLM Model
+glm.model
+
+## Completed Accuracy Table
+Model
+
+##Model column 6 to 9
+Model[,6:9]
+##Model column 2 to 5
+Model[,2:5]
+
+##Model column 10 to 14
+Model[,10:14]
+
+##Model column 15 to 16
+Model[,15:16]
+```
+
+
+#RESULTS:
+
+#1- YES, it is possible to achieve 100% accuracy for Fraud detection.  But when we do that, the number of Type 1 errors increase dramatically. This model rigirourly classifies CLEAN transactions as FRAUD.
+
+#2- We have to further work on the model by relaxing the data-model AT THE COST of lowering the fraud-detection accuracy. The result is that our type 1 error dramatically reduces but it also reduces the ability of the model to capture all fraud-transactions.
+
+#Recommendation:  "We need a much higher data set for fraud transactions, with more data and with more time, it is possible to achieve correct detection at almost 100%"
+
+
